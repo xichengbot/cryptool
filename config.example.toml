@@ -1,0 +1,12 @@
+[binance]
+api_key = ""
+private_key = ""
+
+# USDⓈ-M futures REST endpoint.
+usdm_futures_base_url = "https://fapi.binance.com"
+base_url = "https://api.binance.com"
+recv_window = 5000
+timeout_ms = 10000
+
+[output]
+format = "table"
