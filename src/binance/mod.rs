@@ -7,6 +7,7 @@ mod account;
 pub mod client;
 mod endpoints;
 mod futures_market;
+pub(crate) mod history;
 mod market;
 mod response;
 mod signer;

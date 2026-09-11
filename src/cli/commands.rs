@@ -3,6 +3,8 @@ use clap::Subcommand;
 use super::account::AccountCommand;
 use super::futures_market::FuturesMarketCommand;
 use super::market::MarketCommand;
+#[cfg(feature = "server")]
+use super::serve::ServeCommand;
 
 /// 一级业务子命令。
 ///
@@ -15,4 +17,7 @@ pub enum Command {
     FuturesMarket(FuturesMarketCommand),
     /// 查询账户相关信息。
     Account(AccountCommand),
+    /// Serve the exchange-data HTTP API and optional web assets.
+    #[cfg(feature = "server")]
+    Serve(ServeCommand),
 }

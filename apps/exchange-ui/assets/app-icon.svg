@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#073a46"/>
+      <stop offset="1" stop-color="#061b10"/>
+    </linearGradient>
+    <linearGradient id="whale" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d8f3a4"/>
+      <stop offset="0.52" stop-color="#72d6a0"/>
+      <stop offset="1" stop-color="#2fae83"/>
+    </linearGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="210" fill="url(#background)"/>
+  <rect x="88" y="88" width="848" height="848" rx="194" fill="none" stroke="#2fae83" stroke-width="16" stroke-opacity="0.65"/>
+  <text x="512" y="748" fill="url(#whale)" font-family="Arial Unicode MS, PingFang SC, Microsoft YaHei, sans-serif" font-size="610" font-weight="700" text-anchor="middle">鲸</text>
+</svg>

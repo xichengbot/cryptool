@@ -10,3 +10,17 @@ timeout_ms = 10000
 
 [output]
 format = "table"
+
+# GUI / API query budgets; original CLI trade limits remain unchanged.
+[exchange_data]
+max_concurrent = 4
+request_timeout_ms = 10000
+total_timeout_ms = 30000
+max_upstream_requests = 6
+
+# auto: environment proxy; direct: no proxy; http / socks5: explicit URL.
+[binance.proxy]
+mode = "auto"
+# url = "http://127.0.0.1:8080"
+# username = "local-user"
+# password = "local-password"

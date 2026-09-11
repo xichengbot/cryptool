@@ -3,6 +3,10 @@
 //! `Settings` 负责将内置默认值、可选 TOML 文件、环境变量和 CLI 覆写
 //! 合并为创建 Binance 客户端所需的最终配置。
 
+mod format;
+mod network;
 pub mod settings;
 
+pub use format::OutputFormat;
+pub use network::{ProxyMode, ProxySettings, QuerySettings};
 pub use settings::{BinanceSettings, Settings};

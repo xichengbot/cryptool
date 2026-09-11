@@ -5,5 +5,6 @@
 
 pub mod account;
 pub mod context;
+pub mod exchange_data;
 pub mod futures_market;
 pub mod market;

@@ -5,25 +5,23 @@
 
 use clap::Parser;
 
-mod app;
-mod binance;
 mod cli;
-mod config;
-mod domain;
-mod error;
 mod output;
 
-use crate::config::settings::Settings;
-use app::context::AppContext;
 use cli::{Cli, Command};
+use cryptool::app::context::AppContext;
+use cryptool::config::Settings;
+pub(crate) use cryptool::{app, domain, error};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
 
     let cli = Cli::parse();
 
-    println!("永续合约: {}", cli.future);
+    tracing::debug!(future = cli.future, "parsed CLI market flag");
     let mut settings = Settings::load(cli.config.as_deref(), cli.base_url.clone())?;
     // CLI 覆写配置文件和默认配置中的输出格式。
     if let Some(output) = cli.output {
@@ -31,13 +29,28 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let output_format = settings.output.format;
+
+    #[cfg(feature = "server")]
+    let command = match cli.command {
+        Command::Serve(command) => {
+            let service = cryptool::app::exchange_data::ExchangeDataService::new(settings)?;
+            command.execute(service).await?;
+            return Ok(());
+        }
+        command => command,
+    };
+    #[cfg(not(feature = "server"))]
+    let command = cli.command;
+
     let ctx = AppContext::new(settings)?;
 
     // 各命令都返回 Output，使渲染策略与业务处理解耦。
-    let output = match cli.command {
+    let output = match command {
         Command::Market(command) => command.execute(&ctx).await?,
         Command::FuturesMarket(command) => command.execute(&ctx).await?,
         Command::Account(command) => command.execute(&ctx).await?,
+        #[cfg(feature = "server")]
+        Command::Serve(_) => unreachable!("serve command returned before AppContext construction"),
     };
 
     output::render(output, output_format)?;

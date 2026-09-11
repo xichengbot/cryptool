@@ -1,251 +1,109 @@
-# cryptool 数据流
+# 数据流
 
-## 1. 通用命令执行流
+本文按 2026-09-11 的 `main` 分支（`5093712`）核对。
 
-```text
-用户命令行
-  │
-  ▼
-clap::Cli::parse
-  │  解析全局选项、一级命令和二级子命令
-  ▼
-Settings::load
-  │  默认值 / TOML / 环境变量 / CLI 覆写
-  ▼
-AppContext::new
-  │  构造并复用 BinanceClient
-  ▼
-Command::{Market|FuturesMarket|Account}::execute
-  │
-  ▼
-app 服务
-  │
-  ▼
-Binance adapter
-  │  URL、query、认证、HTTP、JSON 解码
-  ▼
-领域模型 或 AppError
-  │
-  ▼
-Output::{Json|Text|Empty}
-  │
-  ▼
-output::render
-  │
-  ▼
-stdout（JSON 或表格）
+## Web / Desktop 共用查询
+
+```mermaid
+sequenceDiagram
+    participant UI as Dioxus 页面
+    participant Adapter as Web HTTP / Native client
+    participant Service as ExchangeDataService
+    participant Binance as Binance REST
+    UI->>UI: QueryForm 校验 / 开始新 generation
+    UI->>Adapter: TradeQuery
+    Adapter->>Service: HTTP 转换后或原生直接 query()
+    Service->>Service: 校验 / Key 检查 / 冷却 / 并发许可
+    opt TIME 锚点
+        Service->>Binance: aggTrades(T,T+1秒,limit=1)
+        Binance-->>Service: 原始首笔 ID f
+    end
+    loop 有剩余窗口且预算允许
+        Service->>Binance: historicalTrades(fromId,limit)
+        Binance-->>Service: 原始成交
+        Service->>Service: 限长解码 / 精度验证 / 时间确认 / 排序去重
+    end
+    Service-->>Adapter: TradeWindow + 真实 meta 或 QueryError
+    Adapter-->>UI: 相同共享 DTO
+    UI->>UI: 仅当前 generation 可写回 / 分页展示
 ```
 
-## 2. 现货交易规则流
+Web 的 API Key 和代理只在 Axum 端；Native client 不启动 HTTP 服务，也不通过 CLI 子进程调用服务。两端不会从页面传入 Key。
+
+## ID 窗口
+
+输入锚点1000、before499、after500、market=usdm：
 
 ```text
-cryptool market symbol BTCUSDT
-  │
-  ▼
-MarketAction::Symbol { symbol }
-  │
-  ▼
-app::market::handle_symbol(ctx, "BTCUSDT")
-  │
-  ▼
-BinanceMarketApi::exchange_info_symbol
-  │
-  ▼
-BinanceClient::get(spot_base_url, "/api/v3/exchangeInfo", symbol query)
-  │
-  ▼
-GET https://api.binance.com/api/v3/exchangeInfo?symbol=BTCUSDT
-  │
-  ▼
-ExchangeInfoResponse → ExchangeSymbol → ExchangeInfo
-  │
-  ▼
-Output::json → JSON/table renderer
+validate：499+500+1=1000
+起始 ID：1000-499=501
+第一页：fromId501，limit500 → 501..1000
+第二页：fromId1001，limit500 → 1001..1500
+meta：received1000，actual_before499，actual_after500，upstream_calls2
 ```
 
-转换重点：
+游标不会溢出；下界不足或上游保留范围不足时，meta 明确标记。后续分页失败可保留已取得的行，但必须 partial=true。
+
+## TIME 窗口
 
 ```text
-PRICE_FILTER.tickSize          → ExchangeInfo.tick_size
-LOT_SIZE.minQty / stepSize     → min_quantity / step_size
-MIN_NOTIONAL 或 NOTIONAL       → min_notional
-baseAsset / quoteAsset         → base_asset / quote_asset
+输入时间 + 显式单位
+  → checked 转换为微秒比较基准
+  → 聚合成交请求：现货微秒参数，合约毫秒参数
+  → 读取 f（原始 ID）
+  → 从 f-before 查询原始成交
+  → 检查原始 timestamp，确认第一笔处于 [T,T+1秒] 的成交
+  → 按已确认 ID 调整窗口、补齐所需页
 ```
 
-所有数值字段都从字符串直接解析为 `Decimal`。
+聚合成交可能覆盖多个原始成交，不能仅凭 f 就断言其时间满足 T。区间没有聚合成交时返回明确空结果；原始时间尚未确认且预算不足时返回错误。查询不会无限扩大时间范围，交易所接口自身保留范围仍然适用。
 
-## 3. 现货全量规则与状态筛选流
+## 时间转换
 
 ```text
-cryptool market all --status trading
-  │
-  ▼
-SymbolStatusFilter::Status(Trading)
-  │
-  ▼
-SymbolStatus::as_binance_param() → "TRADING"
-  │
-  ▼
-GET /api/v3/exchangeInfo?symbolStatus=TRADING
-  │
-  ▼
-将 symbols 逐条映射为 ExchangeInfo
+输入字符串 / 单位
+  → exchange-types::parse_time
+  → Timestamp（i64 + TimeUnit）
+  → format_utc / format_beijing
+  → 新记录插入历史列表首位
 ```
+
+无后端、无浏览器时区换算、无浮点。错误不追加历史记录。现代上海时间输出+08:00，历史秒级偏移完整保留。
+
+## 原 CLI
 
 ```text
-cryptool market all --status all
-  │
-  ▼
-SymbolStatusFilter::All
-  │
-  ▼
-GET /api/v3/exchangeInfo（无 query）
+clap 参数
+  → Settings 默认/TOML/环境/CLI 覆写
+  → AppContext / 原 app 服务
+  → 原 Binance adapter
+  → 原 domain 模型
+  → Output JSON/table
+  → stdout
 ```
 
-现货的状态筛选由 Binance 服务端完成。
+诊断输出到 stderr，不再混入 JSON stdout。原 CLI 窗口20/20、最多500及字段保持；规则筛选与账户未实现状态不变。
 
-## 4. USDⓈ-M 合约规则流
+## 错误、取消和成本
 
-```text
-cryptool futures-market all --status trading
-  │
-  ▼
-FuturesMarketAction::All
-  │
-  ▼
-app::futures_market::handle_all
-  │
-  ▼
-BinanceFuturesMarketApi::exchange_info
-  │
-  ▼
-GET https://fapi.binance.com/fapi/v1/exchangeInfo
-  │
-  ▼
-客户端按 SymbolStatusFilter 过滤 symbols
-  │
-  ▼
-FuturesExchangeSymbol → FuturesExchangeInfo
+以下仅描述 GUI/API 查询链。每个查询最多6次上游调用；每次调用遇到可重试的瞬时错误时最多重试一次。429/418 设置共享冷却时间并立即返回。history adapter 的单次响应最多2MiB，最终最多1000行。总超时或取消会释放 RAII 并发许可；Mutex 不跨 await。
+
+价格/数量先校验 Decimal，再保留原始字符串返回，避免浮点或不必要的显示舍入。ID/时间的 JSON 字符串协议避免 WASM/浏览器跨边界产生大整数精度损失。
+
+上述请求数量和内存上界来自实现约束；没有使用本地 mock 的延迟作为真实交易所性能指标。
+
+## Web 构建与 Ubuntu 部署
+
+```mermaid
+flowchart LR
+    DX[Dioxus Web build] --> Assets[web-dist/public]
+    Assets --> Embed[Cargo embed-web]
+    Embed --> Local[dist/web-local/cryptool]
+    Assets --> Zig[cargo-zigbuild]
+    Zig --> ELF[Linux x86_64 ELF<br/>GLIBC <= 2.17]
+    ELF --> Package[tar.gz + SHA-256]
+    Package --> Deploy[root 部署脚本]
+    Deploy --> Runtime[cryptool 用户运行<br/>PID + 日志 + config]
 ```
 
-合约 endpoint 不支持现货的 `symbolStatus` 服务端参数，因此必须先取全量再本地过滤。
-
-## 5. 历史公开成交流
-
-### 以 trade ID 为锚点
-
-```text
-cryptool market trades BTCUSDT --trade-id 1000 --before 20 --after 20
-  │
-  ▼
-TradeWindowArgs::to_query
-  │  校验 before + after + 1 ∈ 1..=500
-  ▼
-TradeWindowQuery {
-  anchor: TradeId(1000),
-  start_id: 980,
-  limit: 41,
-}
-  │
-  ▼
-BinanceMarketApi::historical_trades
-  │
-  ▼
-API Key GET /api/v3/historicalTrades?symbol=BTCUSDT&fromId=980&limit=41
-  │
-  ▼
-SpotHistoricalTradeResponse → PublicTrade[]
-```
-
-### 以 UTC 时间为锚点
-
-```text
-cryptool market trades BTCUSDT --time 2026-07-26T12:34:56Z
-  │
-  ▼
-parse_utc_time
-  │  只接受以 Z 结尾的 RFC3339 UTC 时间
-  ▼
-TradeAnchor::Time
-  │
-  ▼
-GET /api/v3/aggTrades?symbol=BTCUSDT&startTime=T&endTime=T+1000&limit=1
-  │
-  ▼
-取得最早匹配 aggregate trade ID
-  │
-  ▼
-TradeWindowQuery::with_trade_id
-  │
-  ▼
-历史成交 API Key GET（同上）
-```
-
-USDⓈ-M 合约历史成交遵循同一两阶段模式，但使用 `/fapi/v1/aggTrades` 和 `/fapi/v1/historicalTrades`，并以 USDⓈ-M base URL 发起请求。
-
-## 6. 认证与签名数据流
-
-### API Key 请求
-
-```text
-BINANCE_API_KEY（TOML 或环境变量）
-  │
-  ▼
-BinanceClient::api_key
-  │  空值时立即返回 Config 错误
-  ▼
-X-MBX-APIKEY header
-  │
-  ▼
-历史成交 endpoint
-```
-
-历史成交是公开市场数据，但 Binance 的 historical trades endpoint 仍要求 API Key。该请求不使用私钥签名。
-
-### 预留的私有签名请求
-
-```text
-业务 query
-  │
-  ▼
-serde_urlencoded
-  │
-  ▼
-canonical_query + recvWindow + timestamp
-  │
-  ▼
-Ed25519 PKCS#8 PEM 私钥签名
-  │
-  ▼
-Base64 signature
-  │
-  ▼
-X-MBX-APIKEY + URL signature query
-```
-
-任何 query 编码、字段顺序、时间戳或 `recvWindow` 的变化都必须发生在签名之前；签名完成后不得改变 URL 参数。
-
-## 7. 错误流
-
-```text
-配置/输入/网络/Binance/JSON/Decimal 错误
-  │
-  ▼
-AppError
-  │
-  ├── Config
-  ├── InvalidInput
-  ├── Http
-  ├── Binance { code, message }
-  ├── Serialization
-  ├── NotFound
-  └── NotImplemented
-  │
-  ▼
-? 传播至 main
-  │
-  ▼
-anyhow::Result<()> 输出错误链并以非零码退出
-```
-
-`decode_response` 优先识别 Binance 标准错误 JSON；如果响应不是 Binance 错误格式，则保留 HTTP 状态码与原始正文，便于分析代理、网关或上游异常。
+部署脚本先正常停止旧服务，再由 root 安装二进制、脚本和只读文档；配置由 root 持有并允许服务组读取，PID/日志由服务用户写入。目标目录和受管文件拒绝符号链接，避免高权限部署跟随服务用户可控路径。运行脚本默认后台启动，也可用 `run` 交给 systemd 或容器托管。

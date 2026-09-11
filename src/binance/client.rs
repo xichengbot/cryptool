@@ -16,8 +16,8 @@ const API_KEY_HEADER: &str = "X-MBX-APIKEY";
 /// 同一进程的所有命令之间保持一致。
 #[derive(Clone)]
 pub struct BinanceClient {
-    settings: BinanceSettings,
-    http: reqwest::Client,
+    pub(super) settings: BinanceSettings,
+    pub(super) http: reqwest::Client,
 }
 
 impl BinanceClient {
@@ -25,8 +25,12 @@ impl BinanceClient {
     ///
     /// 未显式配置代理时，`reqwest` 会遵循进程的 HTTP(S) 代理环境变量。
     pub fn new(settings: BinanceSettings) -> Result<Self, AppError> {
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_millis(settings.timeout_ms))
+        let builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_millis(settings.timeout_ms));
+        let http = settings
+            .proxy
+            .apply(builder)?
             .build()
             .map_err(|err| AppError::Http(format!("failed to build http client: {}", err)))?;
         Ok(Self { settings, http })

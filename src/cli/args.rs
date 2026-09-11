@@ -1,6 +1,6 @@
 use super::commands::Command;
-use crate::output::format::OutputFormat;
 use clap::Parser;
+use cryptool::config::OutputFormat;
 use std::path::PathBuf;
 
 /// 顶层 CLI 参数。
@@ -17,7 +17,7 @@ pub struct Cli {
     pub config: Option<PathBuf>,
 
     /// 输出格式；指定时覆盖配置文件中的 `output.format`。
-    #[arg(long, global = true, value_enum)]
+    #[arg(long, global = true)]
     pub output: Option<OutputFormat>,
 
     /// 使用永续合约模式的开关，供需要区分市场类型的命令使用。

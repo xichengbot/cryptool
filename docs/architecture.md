@@ -1,112 +1,101 @@
-# cryptool 架构概览
+# cryptool / Exchange Data 架构
 
-## 项目定位
+本文按 2026-09-11 的 `main` 分支（`5093712`）核对。项目在原 Rust CLI 上增加 Dioxus Web、Axum 和 macOS / Windows Desktop；当前分析见[代码分析报告](analysis-report.md)，实际运行验证见[验收记录](exchange-data-acceptance.md)。
 
-`cryptool` 是一个 Rust 命令行工具，用于查询 Binance 现货与 USDⓈ-M 合约市场规则、公开历史成交，以及预留的账户与私有交易能力。它以统一领域模型和输出协议隔离 CLI、HTTP adapter 与终端呈现。
+## 能力边界
 
-## 技术栈
+| 入口 | 能力 |
+|---|---|
+| cryptool CLI | 原现货/合约规则查询、历史成交、JSON/表格输出；账户与签名预留状态不变 |
+| Web | 首页、现货成交、合约成交、时间转换及导航/页签/主题 |
+| Desktop | 同一组 Dioxus 页面；只支持 macOS / Windows |
+| Axum API | 健康检查与成交窗口查询，不暴露账户、规则或签名接口 |
 
-- Rust 2024
-- Tokio：异步运行时
-- clap：命令行解析与帮助文本
-- reqwest + rustls：HTTP 客户端，默认继承进程 HTTP(S) 代理环境
-- serde / serde_json / toml：配置与 API JSON 序列化
-- rust_decimal：交易数量、价格和规则的精确十进制表达
-- chrono：UTC 成交时间锚点
-- ed25519-dalek：私有 Binance 请求签名
-- comfy-table：表格输出
+没有新增策略、交易执行、回测、数据库或多租户用户系统。
 
-## 顶层结构
+## 工作区
 
 ```text
-src/
-├── main.rs              # 启动、配置覆写、命令分发、输出渲染
-├── app/                 # 应用服务编排
-├── binance/             # Binance REST adapter、签名与响应映射
-├── cli/                 # clap 命令树与输入校验
-├── config/              # 默认值、TOML、环境变量、CLI 覆写
-├── domain/              # 市场、账户、交易领域模型
-├── output/              # JSON / table 统一输出
-└── error.rs             # 跨层 AppError
+cryptool/
+├── src/
+│   ├── main.rs              # 原 CLI + 可选 serve 命令
+│   ├── lib.rs               # 原生应用 library
+│   ├── app/exchange_data.rs # GUI 共用的查询编排与预算
+│   ├── binance/history.rs   # GUI 成交传输、认证、精度与解码
+│   ├── server/              # 可选 Axum adapter 与静态资源
+│   ├── cli/                 # 原命令与 serve 参数
+│   ├── config/              # TOML、环境、代理与查询预算
+│   ├── domain/              # 原 CLI 领域模型
+│   └── output/              # CLI JSON / table
+├── crates/exchange-types/   # Native / WASM 共享 DTO、时间、校验
+├── apps/exchange-ui/        # 共享页面 + Web / Desktop 平台适配
+├── tests/                   # CLI、原生服务、代理、HTTP 契约
+├── scripts/
+│   ├── app/macos/           # macOS 构建与安装
+│   ├── app/windows/         # Windows 构建与安装
+│   ├── web/                 # Web 构建、Ubuntu 打包/部署和服务管理
+│   └── lib/                 # Bash 公共函数
+└── .github/workflows/       # macOS / Windows 验证与打包
 ```
 
-## 模块边界
+## 依赖关系
 
-```text
-CLI 输入
-  │
-  ▼
-cli ───────────────► app ───────────────► binance ───────────────► Binance REST
-  │                   │                    │
-  │                   └──────── domain ────┘
-  │
-  └────────────────────────────► output ─────────────────────────► stdout
-
-config ────────────────────────► main / AppContext / BinanceClient
-error  ◄──────────────────────── 所有边界层
+```mermaid
+flowchart TD
+    CLI[cryptool CLI] --> Legacy[原 app / domain / output]
+    Web[Dioxus Web / WASM] --> API[Axum API]
+    Desktop[Dioxus Desktop] --> Service[ExchangeDataService]
+    API --> Service
+    Service --> History[Binance history adapter]
+    Legacy --> Client[BinanceClient]
+    History --> Client
+    Client --> Binance[Binance REST]
+    Web --> Types[exchange-types]
+    Desktop --> Types
+    API --> Types
+    Service --> Types
+    Config[原生 Settings] --> Client
+    Config --> Service
 ```
 
-- `cli`：把 clap 解析结果转换成 `MarketCommand`、`FuturesMarketCommand`、`AccountCommand`；不直接处理 HTTP 响应。
-- `app`：应用服务层，只编排查询流程，例如时间锚点先解析为 trade ID 再查询历史成交窗口。
-- `binance`：负责 endpoint、请求认证、HTTP、Binance 错误响应和外部 JSON 到领域模型的转换。
-- `domain`：与 Binance JSON、clap 或终端输出无关的稳定业务类型。
-- `output`：将 `Output` 协议渲染成 JSON 或表格，不参与业务判断。
+`exchange-types` 不依赖 reqwest、Tokio、clap 或本机 I/O。WASM 不链接原生核心；Desktop 的依赖 feature 才启用 cryptool 与本机配置读取。`OutputFormat` 已移至中立 config 模块，消除原 `config → output` 依赖。依赖方向以原生核心和共享类型为下层，不从服务反向调用 UI。
 
-## 入口与命令树
+## 技术栈与取舍
 
-`main` 使用 `#[tokio::main]` 启动：
+| 层 | 选择 | 取舍 |
+|---|---|---|
+| 共享 UI | Dioxus 0.7.10、Rust RSX、CSS | 一套页面覆盖 Web/Desktop；保留系统 WebView 的平台差异 |
+| Web 服务 | Axum 0.8、Tokio | 显式 REST 契约，易于测试；需要维护请求 DTO 到领域查询的映射 |
+| 桌面 | Dioxus Desktop | 直接调用服务，无 localhost 端口；网络任务须运行于原生 Tokio 环境 |
+| 网络 | reqwest、rustls、HTTP/SOCKS5 | 复用连接池和配置；代理/超时统一在原生层控制 |
+| 数据 | serde、Decimal、chrono、chrono-tz | 整数/十进制精度明确；历史时区按实际规则处理 |
+| 发布 | dx、rust-embed | Web 可嵌入单个 Axum 程序；必须先构建前端资源再编译嵌入 feature |
 
-1. 初始化 `tracing_subscriber`。
-2. 解析 `Cli`。
-3. 通过 `Settings::load` 合并默认值 / TOML / 环境变量 / CLI 基地址覆写。
-4. 应用 `--output` 覆写。
-5. 创建持有共享 `BinanceClient` 的 `AppContext`。
-6. 分发顶层 `Command`，各分支返回统一 `Output`。
-7. 按 `OutputFormat` 渲染 stdout。
+项目代码不引入 Vue、Node 工程或 Tauri。Web 的 Rust 编译为 WASM，浏览器加载由工具链生成的绑定代码；Desktop 使用系统 WebView 渲染同一组页面。
 
-```text
-cryptool
-├── market
-│   ├── symbol <SYMBOL>
-│   ├── all [--status trading|halt|break|all]
-│   └── trades <SYMBOL> (--trade-id <ID> | --time <RFC3339Z>) [--before N] [--after N]
-├── futures-market
-│   ├── symbol <SYMBOL>
-│   ├── all [--status trading|halt|break|all]
-│   └── trades <SYMBOL> (--trade-id <ID> | --time <RFC3339Z>) [--before N] [--after N]
-└── account
-    └── balance [--account spot|funding|futures]
-```
+## 并发与状态
 
-## 配置优先级
+- CLI 维持一次命令一个 Tokio runtime、顺序请求的既有模式。
+- GUI 服务共享 reqwest 连接池、Semaphore 和冷却状态；默认同时最多 4 个查询，超额立即返回结构化限流。
+- 同一窗口内部顺序分页；查询总预算默认 30 秒、单请求默认 10 秒（配置上限 60 秒）、最多 6 次上游调用（含重试）。
+- 冷却 Mutex 只在同步代码中短暂持有，不跨 `await`。
+- 每个查询持有 RAII permit；取消 future 同时取消在途请求并释放容量，不分派脱离页面生命周期的后台网络任务。
+- Dioxus 使用 signal 管理表单、结果、页签和主题；请求 generation 防止过期结果覆盖新请求。
+- 时间转换在共享 Rust 中本地完成；GUI 偏好与原生凭据分开保存。
 
-`Settings::load` 的语义如下：
+## 安全边界
 
-```text
-内置默认值 或 --config TOML
-            │
-            ▼
-BINANCE_API_KEY / BINANCE_PRIVATE_KEY 环境变量覆盖凭据
-            │
-            ▼
---base-url 覆盖现货 REST 基地址
-            │
-            ▼
-main 中 --output 覆盖 output.format
-```
+Web 的 API Key 存于 Axum 环境或配置文件；Desktop 在 Rust 原生侧读取。Key、私钥及代理密码不成为页面 props、DOM、Storage 或 HTTP 返回值。GUI 服务清除不使用的私钥，配置 Debug 与 GUI 错误脱敏。
 
-现货与 USDⓈ-M 合约具有独立 base URL。HTTP 客户端使用 `timeout_ms` 创建，并会遵循进程设置的 HTTP(S) 代理环境变量。
+直接执行 `cryptool serve` 默认监听 loopback；`scripts/web/server.sh` 为局域网部署默认监听 `0.0.0.0:8080`，自动发现 LAN 地址并生成 Host 白名单。Axum 校验 Host / Origin；公开部署仍需接入外部 HTTPS/认证。GUI/API 的 history adapter 将上游响应限制为 2 MiB，并拒绝异常 Decimal/时间数据。原 CLI 的业务字段与窗口限制保持，stdout 前置诊断和合约 URL 覆写缺陷已修复；原 CLI 通用响应解码尚未采用同一限长读取器。
 
-## 并发模型
+## 构建与交付边界
 
-- 程序运行在单个 Tokio runtime 上。
-- 命令处理路径是顺序 `await`，没有当前命令内的并发 fan-out。
-- 网络 I/O 由 `reqwest` 异步执行；`BinanceClient` 在 `AppContext` 生命周期内复用，因而复用连接池、超时和代理策略。
-- 当前没有显式锁、channel、spawn 任务或共享可变状态；主要风险来自外部 API 延迟、代理可用性和 Binance 限流。
+| 交付目标 | 构建入口 | 安装/运行入口 |
+|---|---|---|
+| macOS Desktop | `scripts/app/macos/build.sh` | `scripts/app/macos/install.sh` |
+| Windows Desktop | `scripts/app/windows/build.ps1` | `scripts/app/windows/install.ps1` |
+| 本机 Web | `scripts/web/build-local.sh` | `scripts/web/server.sh` |
+| Ubuntu x86_64 Web | `scripts/web/build-ubuntu.sh` | `scripts/web/deploy-ubuntu.sh` |
 
-## 关键约束
-
-- 价格、数量、最小名义金额使用 `Decimal`，避免浮点舍入影响交易规则。
-- 历史成交窗口满足 `before + after + 1 ∈ 1..=500`。
-- 历史成交 endpoint 需要 `X-MBX-APIKEY`，但不需要私钥签名。
-- 私有签名请求使用 Ed25519 PKCS#8 PEM；签名输入必须保持 canonical query 的编码与字段顺序。
+旧顶层脚本保留为参数透传入口。构建产物统一写入 `dist/`；Ubuntu Web 发布包包含单个内嵌页面的 ELF、同目录服务脚本、配置模板和运行文档。Linux 不构建 Desktop。完整命令见[构建与部署索引](build-deploy/README.md)。

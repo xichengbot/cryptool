@@ -1,0 +1,61 @@
+name: Verify Web and Desktop
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.0"
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo test -p exchange-types --locked
+      - run: cargo test -p cryptool --features server --locked
+      - run: cargo test -p exchange-ui --lib --no-default-features --features desktop --locked
+      - run: cargo clippy -p cryptool --all-targets --features server --locked -- -D warnings
+      - run: cargo clippy -p exchange-ui --no-default-features --features desktop --locked -- -D warnings
+      - run: cargo check -p exchange-ui --target wasm32-unknown-unknown --no-default-features --features web --locked
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.0"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install dioxus-cli --version 0.7.10 --locked
+      - if: runner.os == 'macOS'
+        run: scripts/build-desktop.sh
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build-desktop.ps1
+      - if: runner.os == 'macOS'
+        run: scripts/build-web.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exchange-data-${{ runner.os }}
+          path: dist/
+          if-no-files-found: error
+      - if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cryptool-web-macos
+          path: target/release/cryptool
+          if-no-files-found: error

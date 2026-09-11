@@ -1,0 +1,19 @@
+[application]
+name = "Exchange Data"
+default_platform = "web"
+
+[web.app]
+title = "Exchange Data"
+
+[web.watcher]
+reload_html = true
+
+[bundle]
+identifier = "com.cryptool.exchange-data"
+publisher = "cryptool"
+icon = ["assets/app-icon.png"]
+short_description = "Binance 历史成交与时间检查工具"
+long_description = "用于检查 Binance 现货和 USD-M 历史成交，并进行 UTC 与北京时间转换。"
+
+[bundle.windows.webview_install_mode.DownloadBootstrapper]
+silent = true

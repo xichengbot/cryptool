@@ -3,12 +3,11 @@
 //! 命令处理器返回 `Output`，入口根据配置选择 JSON 或表格渲染，从而不让
 //! 业务层依赖终端格式。
 
-pub mod format;
 pub mod json;
 pub mod table;
 
 use crate::error::AppError;
-use crate::output::format::OutputFormat;
+use cryptool::config::OutputFormat;
 use serde::Serialize;
 use serde_json::Value;
 

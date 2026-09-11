@@ -8,6 +8,8 @@ pub mod args;
 pub mod commands;
 mod futures_market;
 pub mod market;
+#[cfg(feature = "server")]
+pub mod serve;
 mod trades;
 
 // 重新导出

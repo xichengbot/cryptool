@@ -11,3 +11,15 @@
 
 # local config
 /config.toml
+
+# Isolated implementation workspaces and local progress notes
+/.worktrees/
+/.superpowers/
+
+# Generated Dioxus Web assets and desktop bundles
+/web-dist/
+/dist/
+
+# Local state created by the Web launcher
+/scripts/cryptool.pid
+/scripts/cryptool.log

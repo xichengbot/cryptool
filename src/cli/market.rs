@@ -46,13 +46,13 @@ impl MarketCommand {
     pub async fn execute(self, ctx: &AppContext) -> Result<Output, AppError> {
         match self.action {
             MarketAction::Symbol { symbol } => {
-                let exchange_info = app::market::handle_symbol(&ctx, &symbol).await?;
+                let exchange_info = app::market::handle_symbol(ctx, &symbol).await?;
                 Output::json(exchange_info)
             }
 
             MarketAction::All { status } => {
                 // TODO
-                let exchange_info = app::market::handle_all(&ctx, status).await?;
+                let exchange_info = app::market::handle_all(ctx, status).await?;
                 Output::json(exchange_info)
             }
 

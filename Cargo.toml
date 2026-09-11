@@ -3,13 +3,24 @@ name = "cryptool"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "crates/exchange-types", "apps/exchange-ui"]
+default-members = ["."]
+resolver = "3"
+
+[features]
+default = []
+server = ["dep:axum", "dep:tower-http"]
+embed-web = ["server", "dep:rust-embed", "dep:mime_guess"]
+
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
+exchange-types = { path = "crates/exchange-types" }
 toml = "1.1.2"
-reqwest = { version = "0.13.4", features = ["json", "query", "rustls"] }
+reqwest = { version = "0.13.4", features = ["json", "query", "rustls", "socks"] }
 anyhow = "1"
 rust_decimal = { version = "1", features = ["serde"] }
 tracing-subscriber = "0.3.23"
@@ -20,3 +31,12 @@ chrono = { version = "0.4.45" , features = ["serde"]}
 serde_urlencoded = "0.7.1"
 base64 = "0.22.1"
 ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "pem"] }
+httpdate = "1.0.3"
+axum = { version = "0.8", optional = true }
+tower-http = { version = "0.6", features = ["fs", "trace"], optional = true }
+rust-embed = { version = "8", features = ["debug-embed"], optional = true }
+mime_guess = { version = "2", optional = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
