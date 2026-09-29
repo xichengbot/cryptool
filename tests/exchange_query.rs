@@ -10,6 +10,40 @@ fn query(market: Market, before: u16, after: u16) -> TradeQuery {
 }
 
 #[tokio::test]
+async fn futures_preserve_rpi_true_false_and_unavailable_flags() {
+    let mock = Fixture::start(|_, req| {
+        let mut response = history(req, false);
+        let rows = response.body.as_array_mut().unwrap();
+        rows[0]["isRPITrade"] = json!(true);
+        rows[1]["isRPITrade"] = json!(false);
+        rows[3]["isRPITrade"] = json!(null);
+        response
+    })
+    .await;
+    let result = ExchangeDataService::new(mock.settings())
+        .unwrap()
+        .query(query(Market::Usdm, 0, 3))
+        .await
+        .unwrap();
+    let json = serde_json::to_value(result).unwrap();
+    let flags = json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row.get("is_rpi_trade").cloned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        flags,
+        vec![
+            Some(json!(true)),
+            Some(json!(false)),
+            Some(json!(null)),
+            Some(json!(null))
+        ]
+    );
+}
+
+#[tokio::test]
 async fn futures_thousand_records_use_two_bounded_pages() {
     let mock = Fixture::start(|_, req| history(req, false)).await;
     let result = ExchangeDataService::new(mock.settings())

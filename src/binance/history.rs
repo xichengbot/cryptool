@@ -24,6 +24,8 @@ struct HistoricalTrade {
     maker: bool,
     #[serde(rename = "isBestMatch")]
     best_match: Option<bool>,
+    #[serde(rename = "isRPITrade")]
+    is_rpi_trade: Option<bool>,
 }
 #[derive(Deserialize)]
 struct AggregateTrade {
@@ -115,6 +117,11 @@ impl BinanceClient {
                         maker: raw.maker,
                         best_match: if market == Market::Spot {
                             raw.best_match
+                        } else {
+                            None
+                        },
+                        is_rpi_trade: if market == Market::Usdm {
+                            raw.is_rpi_trade
                         } else {
                             None
                         },

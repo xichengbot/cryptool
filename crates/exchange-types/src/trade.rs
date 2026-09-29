@@ -117,6 +117,8 @@ pub struct TradeRow {
     pub timestamp: Timestamp,
     pub maker: bool,
     pub best_match: Option<bool>,
+    #[serde(default)]
+    pub is_rpi_trade: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

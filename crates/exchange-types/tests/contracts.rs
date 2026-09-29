@@ -213,6 +213,30 @@ fn validation_rejects_invalid_raw_dtos_and_symbols() {
 }
 
 #[test]
+fn trade_rows_preserve_optional_rpi_flags_and_accept_older_responses() {
+    let old_row = serde_json::json!({
+        "id": "42", "price": "65000.00", "qty": "0.001", "quote_qty": "65.00",
+        "timestamp": {"value": "1700000000123", "unit": "ms"},
+        "maker": true, "best_match": null
+    });
+    for flag in [Some(true), Some(false), None] {
+        let mut value = old_row.clone();
+        value["is_rpi_trade"] = serde_json::json!(flag);
+        let row: TradeRow = serde_json::from_value(value).unwrap();
+        let serialized = serde_json::to_value(row).unwrap();
+        assert_eq!(
+            serialized.get("is_rpi_trade"),
+            Some(&serde_json::json!(flag))
+        );
+    }
+    let row: TradeRow = serde_json::from_value(old_row).unwrap();
+    assert_eq!(
+        serde_json::to_value(row).unwrap().get("is_rpi_trade"),
+        Some(&serde_json::Value::Null)
+    );
+}
+
+#[test]
 fn dto_and_error_wire_shapes_are_stable() {
     let query = TradeQuery::new(Market::Spot, "BTCUSDT", TradeAnchor::Id(42), 1, 2).unwrap();
     let window = TradeWindow {
@@ -227,6 +251,7 @@ fn dto_and_error_wire_shapes_are_stable() {
             },
             maker: true,
             best_match: Some(false),
+            is_rpi_trade: None,
         }],
         meta: TradeWindowMeta {
             query,

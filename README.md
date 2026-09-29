@@ -62,6 +62,8 @@ cargo run -p cryptool -- --config ./config.toml futures-market trades BTCUSDT --
 
 CLI 保持默认前后各 20、总上限 500 和原有输出字段。GUI 默认各 50、总上限 1,000，合约按每页 500 条分页。GUI/API 的 ID 和时间不经浮点转换，JSON 使用字符串保留大整数；现货使用微秒，合约使用毫秒。
 
+合约成交明细显示 `RPI 成交`，使用 Binance `historicalTrades` 的 `isRPITrade` 字段：`true` 显示“是”，`false` 显示“否”，字段缺失或为空显示“未提供”。Web 与桌面均可在已加载窗口内筛选 RPI、非 RPI 或未提供标记的逐笔；筛选不会增加交易所请求或改变原始窗口统计。GUI/API 的对应字段为可选的 `is_rpi_trade`。
+
 USD-M 按时间定位使用 Binance `aggTrades`，仅支持最近 2 天；已知成交 ID 时，`historicalTrades` 可查询最近 1 个月。更早的逐笔需要使用 [Binance Public Data](https://github.com/binance/binance-public-data) 的 USD-M `daily/monthly/trades` 文件，当前程序尚未集成该归档数据源。
 
 ## 开发验证
